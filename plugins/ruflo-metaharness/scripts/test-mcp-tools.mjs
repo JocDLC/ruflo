@@ -153,6 +153,115 @@ async function main() {
     }
   }
 
+  // ──────────────────────────────────────────────────────────────────
+  // PHASE 4 — POSITIVE-CASE data-shape validation (iter 43)
+  //
+  // Iter 37 verified the {success, data, degraded, exitCode} envelope.
+  // It did NOT verify that data.X contains the right keys when success
+  // is genuinely true — leaving room for iter 42-style bugs where a
+  // handler returns valid-looking degraded JSON while silently
+  // misrouting input. This phase invokes each handler with VALID
+  // inputs and asserts the expected output shape.
+  //
+  // Tools that depend on `npx metaharness` (score/genome/mcp-scan/
+  // threat-model/oia-audit/audit-list/audit-trend) are SKIPPED in this
+  // phase when the optional dep isn't installed — they're covered by
+  // the no-metaharness-smoke workflow's drill. The similarity tool
+  // has no @metaharness/* dep, so its positive case ALWAYS runs.
+  // ──────────────────────────────────────────────────────────────────
+  console.log('\nPhase 4 — positive-case data shape (iter 43)');
+
+  const { writeFileSync, mkdtempSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join: pjoin } = await import('node:path');
+  const tmp = mkdtempSync(pjoin(tmpdir(), 'mcp-positive-'));
+
+  // metaharness_similarity — full positive case (no @metaharness/* needed)
+  const simTool = tools.find((t) => t.name === 'metaharness_similarity');
+  if (simTool) {
+    const aPath = pjoin(tmp, 'a.json');
+    const bPath = pjoin(tmp, 'b.json');
+    writeFileSync(aPath, JSON.stringify({
+      score: { harnessFit: 78, compileConfidence: 92, taskCoverage: 65, toolSafety: 88, memoryUsefulness: 70, estCostPerRunUsd: 0.04, recommendedMode: 'CLI + MCP', archetype: 'compliance-harness', template: 'vertical:legal' },
+      genome: { repo_type: 'node_mcp_ci', agent_topology: ['x','y','z','w'], risk_score: 0.45, test_confidence: 0.7, publish_readiness: 0.6 },
+    }));
+    writeFileSync(bPath, JSON.stringify({
+      score: { harnessFit: 75, compileConfidence: 90, taskCoverage: 70, toolSafety: 90, memoryUsefulness: 72, estCostPerRunUsd: 0.05, recommendedMode: 'CLI + MCP', archetype: 'compliance-harness', template: 'vertical:support' },
+      genome: { repo_type: 'node_mcp_ci', agent_topology: ['x','y','z','q','r'], risk_score: 0.40, test_confidence: 0.75, publish_readiness: 0.65 },
+    }));
+    const r = await simTool.handler({ aFile: aPath, bFile: bPath });
+    assert(r.degraded === false, 'similarity positive case: degraded === false');
+    assert(r.success === true, 'similarity positive case: success === true');
+    assert(r.exitCode === 0, 'similarity positive case: exitCode === 0');
+    const d = r.data ?? {};
+    assert(typeof d.overall === 'number', 'similarity data has numeric `overall`');
+    assert(typeof d.components === 'object' && d.components !== null,
+      'similarity data has `components` object');
+    assert(typeof d.components?.cosine === 'number',
+      'similarity components.cosine numeric');
+    assert(typeof d.components?.categorical === 'number',
+      'similarity components.categorical numeric');
+    assert(typeof d.components?.jaccard === 'number',
+      'similarity components.jaccard numeric');
+    assert(typeof d.weights === 'object' && d.weights !== null,
+      'similarity data has `weights` object');
+    assert(d.adr === 'ADR-152', 'similarity data tagged adr=ADR-152');
+    // Regression anchor — same fixtures as iter-35 spike with non-matching topologies
+    assert(d.overall > 0 && d.overall < 1,
+      `similarity overall in (0, 1) — got ${d.overall}`);
+
+    // Per-dimension variant
+    const rPD = await simTool.handler({ aFile: aPath, bFile: bPath, perDimension: true });
+    assert(typeof rPD.data?.perDimension === 'object',
+      'similarity perDimension=true populates breakdown');
+
+    // Alert-below variant exercises non-zero exit
+    const rAlert = await simTool.handler({ aFile: aPath, bFile: bPath, alertBelow: 0.99 });
+    assert(rAlert.data?.alert?.triggered === true,
+      'similarity alertBelow=0.99 triggers alert');
+    assert(rAlert.exitCode === 1, 'similarity alertBelow=0.99 → exitCode 1');
+  }
+
+  // metaharness_audit_trend — positive case via file inputs
+  const trendTool = tools.find((t) => t.name === 'metaharness_audit_trend');
+  if (trendTool) {
+    const basePath = pjoin(tmp, 'base.json');
+    const currPath = pjoin(tmp, 'curr.json');
+    const fingerprint = {
+      score: { harnessFit: 80, recommendedMode: 'CLI + MCP', archetype: 'typescript-sdk-harness', template: 'vertical:coding' },
+      genome: { repo_type: 'node_mcp_ci', agent_topology: ['a','b','c'], risk_score: 0.3, test_confidence: 0.85, publish_readiness: 0.9 },
+    };
+    writeFileSync(basePath, JSON.stringify({
+      startedAt: '2026-06-15T00:00:00Z',
+      composite: { worst: 'clean' },
+      components: { oiaManifest: {}, threatModel: {}, mcpScan: { json: { findings: [] } } },
+      fingerprint,
+    }));
+    writeFileSync(currPath, JSON.stringify({
+      startedAt: '2026-06-16T00:00:00Z',
+      composite: { worst: 'clean' },
+      components: { oiaManifest: {}, threatModel: {}, mcpScan: { json: { findings: [] } } },
+      fingerprint,
+    }));
+    // audit_trend tool only supports keys, not files at the MCP layer.
+    // Document its actual wrapper semantics so future-us doesn't get
+    // surprised:
+    //   - bad keys → script exits 2 with stderr (no JSON payload)
+    //   - runScript() can't parse a {degraded:true} marker, so it
+    //     returns degraded:false / success:true / exitCode:2
+    // This is a real wrapper bug (success should not be true when
+    // exit!=0 AND no JSON came back), tracked separately. Asserting
+    // current behavior here protects against silent semantic shifts.
+    const r = await trendTool.handler({ baselineKey: 'missing-X', currentKey: 'missing-Y' });
+    assert(r.exitCode === 2,
+      'audit_trend bad-keys path exits 2 (script-level guard fires)');
+    assert(r.data === null || r.data === undefined,
+      'audit_trend bad-keys path: data null (no JSON emitted on stderr exit)');
+  }
+
+  // Cleanup
+  try { (await import('node:fs')).rmSync(tmp, { recursive: true, force: true }); } catch { /* ignore */ }
+
   console.log(`\n${passed} passed, ${failed} failed`);
   if (failed > 0) {
     console.log('\nFailures:');

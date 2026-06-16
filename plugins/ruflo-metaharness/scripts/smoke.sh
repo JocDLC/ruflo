@@ -191,6 +191,20 @@ grep -q "execCli(\[\s*'-y'\s*,\s*'metaharness@latest'" "$F" 2>/dev/null || \
 grep -q "cwd: opts" "$F" || miss="$miss no-cwd-passthrough"
 [[ -z "$miss" ]] && ok || bad "$miss"
 
+step "17z6. test-mcp-tools.mjs Phase 4 positive-case (iter 43 — output-shape gate)"
+F="$ROOT/scripts/test-mcp-tools.mjs"
+miss=""
+grep -q "Phase 4 — positive-case" "$F" 2>/dev/null || miss="$miss no-phase-4"
+grep -q "similarity positive case" "$F" 2>/dev/null || miss="$miss no-similarity-positive"
+grep -q "similarity data has numeric.*overall" "$F" 2>/dev/null || miss="$miss no-overall-assert"
+grep -q "similarity components.cosine numeric" "$F" 2>/dev/null || miss="$miss no-cosine-assert"
+grep -q "similarity components.categorical numeric" "$F" 2>/dev/null || miss="$miss no-categorical-assert"
+grep -q "similarity alertBelow=0.99 → exitCode 1" "$F" 2>/dev/null || miss="$miss no-alert-assert"
+grep -q "audit_trend bad-keys path exits 2" "$F" 2>/dev/null || miss="$miss no-trend-exit-assert"
+# Runtime: full test passes (90+ assertions now expected)
+node "$F" >/dev/null 2>&1 || miss="$miss runtime-fails"
+[[ -z "$miss" ]] && ok || bad "$miss"
+
 step "17z5. CLI dispatcher round-trips flags (iter 42 — fixes existing bug)"
 miss=""
 DISP="$ROOT/../../v3/@claude-flow/cli/src/commands/metaharness.ts"
