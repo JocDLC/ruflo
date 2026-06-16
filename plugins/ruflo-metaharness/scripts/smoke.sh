@@ -170,6 +170,23 @@ if (!od.metaharness) { console.error('missing metaharness in optionalDependencie
 if (j.dependencies && j.dependencies.metaharness) { console.error('metaharness leaked into dependencies'); process.exit(1); }
 " 2>/dev/null && ok || bad "ruflo wrapper missing metaharness optionalDep"
 
+step "17i. audit-trend — diff two oia-audit snapshots (iter 15)"
+F="$ROOT/scripts/audit-trend.mjs"
+miss=""
+[[ -x "$F" ]] || miss="$miss not-executable"
+node --check "$F" 2>/dev/null || miss="$miss syntax-error"
+# Severity rank present + correct ordering
+grep -q "SEVERITY_RANK = { clean: 0, low: 1, medium: 2, high: 3 }" "$F" || miss="$miss no-severity-rank"
+# Both file-input AND memory-key-input paths
+grep -q "baseline-key\|baselineKey" "$F" || miss="$miss no-mem-key-input"
+grep -q "current-key\|currentKey" "$F" || miss="$miss no-current-key"
+# Findings set-diff (fingerprint-based)
+grep -q "fingerprint\|new Set" "$F" || miss="$miss no-findings-diff"
+# Alert flag + exit semantics
+grep -q "alert-on-worsening" "$F" || miss="$miss no-alert-flag"
+grep -q "process.exit(1)" "$F" || miss="$miss no-fail-closed"
+[[ -z "$miss" ]] && ok || bad "$miss"
+
 step "17h. doctor integration — checkMetaharness in standard health checks (iter 14)"
 F="$ROOT/../../v3/@claude-flow/cli/src/commands/doctor.ts"
 miss=""
