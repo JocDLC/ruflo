@@ -657,8 +657,13 @@ grep -q "metaharness drift-from-history" "$W" 2>/dev/null || miss="$miss no-cli-
 grep -q '"path": "file"' "$W" 2>/dev/null || miss="$miss no-path-file-assert"
 grep -q '"skippedAuditList": true' "$W" 2>/dev/null || miss="$miss no-skip-true-assert"
 grep -q "/tmp/drift-baseline.json" "$W" 2>/dev/null || miss="$miss no-baseline-path"
-# Iter-98 step lives in the metaharness-real-data job
-grep -B100 "Drift-from-history dispatcher round-trip" "$W" 2>/dev/null | grep -q "metaharness-real-data:" \
+# Iter-98 step lives in the metaharness-real-data job. The brittle
+# fixed-window lookback (-B100) broke once the job grew past 100 lines;
+# instead use awk to find the most recent top-level job header above
+# the step and check it is metaharness-real-data.
+last_job=$(awk '/^  [a-zA-Z_-]+:[[:space:]]*$/ { last=$0 }
+                /Drift-from-history dispatcher round-trip/ { print last; exit }' "$W" 2>/dev/null)
+echo "$last_job" | grep -q "metaharness-real-data:" \
   || miss="$miss not-in-real-data-job"
 [[ -z "$miss" ]] && ok || bad "$miss"
 
@@ -737,8 +742,10 @@ for t in $TOOLS; do
   grep -q "mcp__claude-flow__${t}" "$CMD" 2>/dev/null \
     || miss="$miss ${t}-not-in-claude-md"
 done
-# Lock count: 9 MCP tools (mint deliberately excluded — see iter 73)
-[[ "$COUNT" == "9" ]] || miss="$miss mcp-tool-count-stale:$COUNT-expected-9"
+# Lock count: 12 MCP tools (mint deliberately excluded — see iter 73).
+# Bumped from 9 → 12 after ADR-153 added metaharness_bench,
+# metaharness_evolve, and metaharness_security_bench.
+[[ "$COUNT" == "12" ]] || miss="$miss mcp-tool-count-stale:$COUNT-expected-12"
 [[ -z "$miss" ]] && ok || bad "$miss"
 
 step "17z55. MCP enum + SEVERITY_RANK vocabulary aligned (iter 92)"
