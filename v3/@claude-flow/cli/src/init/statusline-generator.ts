@@ -226,9 +226,19 @@ function getStatuslineData() {
   // back to \`npx --prefer-offline @claude-flow/cli\` (no @latest); an existing
   // but broken install (e.g. a stale marketplace checkout missing a bundled
   // workspace dep) must not block trying the next one.
+  //
+  // No \`2>/dev/null\` here (deliberately) — the execSync call below already
+  // sets stdio: ['pipe','pipe','pipe'], which captures/discards stderr at the
+  // Node level regardless of shell. The redirect was redundant on POSIX and
+  // actively broke every candidate on Windows: cmd.exe (execSync's default
+  // shell there) doesn't understand /dev/null, so the CLI delegation always
+  // failed, silently degrading every render to buildLocalFallback() — 0%
+  // intelligence and an empty promo row (the memo cache that keeps the row
+  // populated across CLI hiccups is only ever written from a SUCCESSFUL
+  // delegation, so it could never get seeded on Windows either).
   const cmds = resolveCliBinCandidates()
-    .map((bin) => '"' + process.execPath + '" "' + bin + '" hooks statusline --json 2>/dev/null')
-    .concat(['npx --prefer-offline @claude-flow/cli hooks statusline --json 2>/dev/null']);
+    .map((bin) => '"' + process.execPath + '" "' + bin + '" hooks statusline --json')
+    .concat(['npx --prefer-offline @claude-flow/cli hooks statusline --json']);
   for (const cmd of cmds) {
     try {
       const raw = execSync(

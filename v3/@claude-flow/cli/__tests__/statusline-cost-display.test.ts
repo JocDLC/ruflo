@@ -149,3 +149,26 @@ describe('statusline trailing newline — breathing room before the input prompt
     }
   });
 });
+
+describe('CLI delegation command is Windows-safe (no POSIX-only shell redirect)', () => {
+  // execSync already sets stdio: ['pipe','pipe','pipe'] on the delegation
+  // call, which captures/discards stderr at the Node level regardless of
+  // shell. A `2>/dev/null` in the command STRING is therefore redundant on
+  // POSIX and actively breaks every delegation candidate on Windows — cmd.exe
+  // (execSync's default shell there) doesn't understand /dev/null, so the
+  // CLI call always fails and every render silently degrades to
+  // buildLocalFallback(): 0% intelligence and (once the memo cache — which
+  // is only ever seeded by a SUCCESSFUL delegation — is empty) no promo row
+  // either. Pre-existing since the #2337 delegation-caching fix (2026-06-10);
+  // fixed here after a real Windows user hit exactly this symptom.
+  it('the node-bin and npx delegation commands carry no POSIX-only redirect', () => {
+    // Match the actual command-template lines, not the surrounding comments
+    // (one of which explains, in prose, that the redirect was removed — a
+    // naive whole-function substring check would false-negative on that).
+    const cmdLines = SCRIPT.split('\n').filter(
+      (l) => l.includes('hooks statusline --json') && !l.trim().startsWith('//'),
+    );
+    expect(cmdLines.length).toBeGreaterThanOrEqual(2); // node-bin candidates + npx fallback
+    for (const line of cmdLines) expect(line).not.toContain('2>/dev/null');
+  });
+});
