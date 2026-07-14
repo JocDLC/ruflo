@@ -597,7 +597,6 @@ function getCostFromStdin() {
   return null;
 }
 
-// Read package version from the first package.json we find.
 // Compares dotted-numeric version strings (e.g. "3.27.1" vs "3.27.10").
 // Returns >0 if a>b, <0 if a<b, 0 if equal-as-far-as-parseable. Deliberately
 // simple (no prerelease/build-metadata handling) — this only orders local
@@ -615,7 +614,11 @@ function compareVersions(a, b) {
 }
 
 function getPkgVersion() {
-  let ver = '3.6';
+  // Baked in at generation time from the real running CLI's own resolved
+  // version (see generateStatuslineScript()'s doc comment) — correct even
+  // when this renders via a pure npx invocation with no local install for
+  // the candidate scan below to find.
+  let ver = "3.27.3";
   try {
     const home = os.homedir();
     const pkgPaths = [

@@ -11,6 +11,7 @@
  */
 
 import type { InitOptions } from './types.js';
+import { getInstalledCliVersion } from './helper-refresh.js';
 
 /**
  * Generate optimized statusline script
@@ -24,6 +25,18 @@ import type { InitOptions } from './types.js';
  */
 export function generateStatuslineScript(options: InitOptions): string {
   const maxAgents = options.runtime.maxAgents;
+  // Resolved reliably HERE (inside the actual running CLI process, via
+  // getInstalledCliVersion()'s createRequire/findPackageRoot resolution) —
+  // never wrong at generation time. Baked in as getPkgVersion()'s fallback
+  // so a pure-npx render (no persistent local install: no marketplace
+  // checkout, no project node_modules, nothing under a global prefix — npx
+  // only ever installs into its own ephemeral, unpredictably-hashed
+  // ~/.npm/_npx/<hash>/ directory, which none of getPkgVersion()'s
+  // candidate paths can find) shows the real version instead of the
+  // previous hardcoded "3.6" placeholder. getPkgVersion()'s own runtime
+  // candidate scan still wins over this baked-in value when it finds
+  // something newer (e.g. a later `npm update` in the same project).
+  const bakedVersion = getInstalledCliVersion();
 
   return `#!/usr/bin/env node
 /**
@@ -624,7 +637,6 @@ function getCostFromStdin() {
   return null;
 }
 
-// Read package version from the first package.json we find.
 // Compares dotted-numeric version strings (e.g. "3.27.1" vs "3.27.10").
 // Returns >0 if a>b, <0 if a<b, 0 if equal-as-far-as-parseable. Deliberately
 // simple (no prerelease/build-metadata handling) — this only orders local
@@ -642,7 +654,11 @@ function compareVersions(a, b) {
 }
 
 function getPkgVersion() {
-  let ver = '3.6';
+  // Baked in at generation time from the real running CLI's own resolved
+  // version (see generateStatuslineScript()'s doc comment) — correct even
+  // when this renders via a pure npx invocation with no local install for
+  // the candidate scan below to find.
+  let ver = ${JSON.stringify(bakedVersion)};
   try {
     const home = os.homedir();
     const pkgPaths = [
