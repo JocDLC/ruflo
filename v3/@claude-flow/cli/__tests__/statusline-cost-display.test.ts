@@ -20,7 +20,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { execFileSync } from 'child_process';
-import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync } from 'fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -170,5 +170,51 @@ describe('CLI delegation command is Windows-safe (no POSIX-only shell redirect)'
     );
     expect(cmdLines.length).toBeGreaterThanOrEqual(2); // node-bin candidates + npx fallback
     for (const line of cmdLines) expect(line).not.toContain('2>/dev/null');
+  });
+});
+
+describe('getPkgVersion() — highest candidate wins, not first-found', () => {
+  // Claude Code's own plugin marketplace mechanism syncs on its own git-pull
+  // cadence, independent of npm publishes — a freshly-published npm version
+  // can sit alongside a stale marketplace checkout for a while (observed
+  // live: right after a publish, the marketplace path — checked FIRST in
+  // the candidate list — still read the prior release). Taking the first
+  // EXISTING candidate meant the header could show a stale version even
+  // when a newer install was sitting right there in another candidate.
+  it('source pins the max-version-wins comparison, not break-on-first-match', () => {
+    expect(SCRIPT).toContain('function compareVersions(');
+    expect(SCRIPT).toContain('compareVersions(pkg.version, ver) > 0');
+  });
+
+  it('renders the HIGHER of two real candidate package.json versions', () => {
+    const home = mkdtempSync(path.join(tmpdir(), 'ruflo-statusline-ver-home-'));
+    const cwd = mkdtempSync(path.join(tmpdir(), 'ruflo-statusline-ver-cwd-'));
+    const scriptPath = path.join(cwd, 'statusline.cjs');
+    writeFileSync(scriptPath, SCRIPT, 'utf-8');
+    try {
+      // Marketplace candidate (checked first) — deliberately the STALE one.
+      const marketplaceDir = path.join(home, '.claude', 'plugins', 'marketplaces', 'ruflo');
+      mkdirSync(marketplaceDir, { recursive: true });
+      writeFileSync(path.join(marketplaceDir, 'package.json'), JSON.stringify({ version: '3.27.0' }));
+      // v3 monorepo candidate (checked later) — the NEWER one.
+      const monorepoDir = path.join(cwd, 'v3', '@claude-flow', 'cli');
+      mkdirSync(monorepoDir, { recursive: true });
+      writeFileSync(path.join(monorepoDir, 'package.json'), JSON.stringify({ version: '3.27.1' }));
+
+      const payload = JSON.stringify({ model: { display_name: 'Opus 4.8' } });
+      const out = execFileSync(process.execPath, [scriptPath], {
+        input: payload,
+        encoding: 'utf-8',
+        cwd,
+        env: { PATH: '/nonexistent', HOME: home },
+        timeout: 15000,
+      });
+      const header = stripAnsi(out).split('\n')[0];
+      expect(header).toContain('V3.27.1');
+      expect(header).not.toContain('V3.27.0');
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+      rmSync(cwd, { recursive: true, force: true });
+    }
   });
 });

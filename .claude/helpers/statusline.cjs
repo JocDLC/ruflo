@@ -598,6 +598,22 @@ function getCostFromStdin() {
 }
 
 // Read package version from the first package.json we find.
+// Compares dotted-numeric version strings (e.g. "3.27.1" vs "3.27.10").
+// Returns >0 if a>b, <0 if a<b, 0 if equal-as-far-as-parseable. Deliberately
+// simple (no prerelease/build-metadata handling) — this only orders local
+// package.json versions against each other, never anything untrusted from
+// a payload, so a full semver implementation would be dead weight here.
+function compareVersions(a, b) {
+  const pa = String(a).split('.').map((n) => parseInt(n, 10));
+  const pb = String(b).split('.').map((n) => parseInt(n, 10));
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const na = Number.isFinite(pa[i]) ? pa[i] : 0;
+    const nb = Number.isFinite(pb[i]) ? pb[i] : 0;
+    if (na !== nb) return na - nb;
+  }
+  return 0;
+}
+
 function getPkgVersion() {
   let ver = '3.6';
   try {
@@ -629,11 +645,24 @@ function getPkgVersion() {
         );
       }
     } catch { /* ignore */ }
+    // Pick the HIGHEST version among every candidate that exists, not the
+    // first one found. The marketplace plugin path is probed first (list
+    // order above), but Claude Code's own plugin marketplace mechanism
+    // syncs on its own git-pull cadence, independent of npm publishes — a
+    // freshly-published npm version can sit alongside a stale marketplace
+    // checkout for a while (observed live: marketplace one release behind
+    // right after a publish). Taking the first EXISTING candidate meant the
+    // header could show a stale version even when a newer install (e.g.
+    // node_modules/@claude-flow/cli from a plain npm install) was sitting right there.
+    let found = false;
     for (const p of pkgPaths) {
       if (!fs.existsSync(p)) continue;
       try {
         const pkg = JSON.parse(fs.readFileSync(p, 'utf-8'));
-        if (pkg && typeof pkg.version === 'string' && pkg.version.length > 0) { ver = pkg.version; break; }
+        if (pkg && typeof pkg.version === 'string' && pkg.version.length > 0) {
+          if (!found || compareVersions(pkg.version, ver) > 0) ver = pkg.version;
+          found = true;
+        }
       } catch { /* ignore */ }
     }
   } catch { /* ignore */ }
